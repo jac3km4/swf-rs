@@ -1,7 +1,8 @@
+use std::io::{Result, Write};
+
 use crate::avm2::opcode::OpCode;
 use crate::avm2::types::*;
 use crate::write::SwfWrite;
-use std::io::{Result, Write};
 
 pub struct Writer<W: Write> {
     inner: W,
@@ -272,6 +273,14 @@ impl<W: Write> Writer<W> {
             Multiname::MultinameLA { ref namespace_set } => {
                 self.write_u8(0x1c)?;
                 self.write_index(namespace_set)?;
+            },
+            Multiname::TypeName { ref name, ref parameters } => {
+                self.write_u8(0x1d)?;
+                self.write_index(name)?;
+                self.write_u32(parameters.len() as u32)?;
+                for param in parameters {
+                    self.write_index(param)?;
+                }
             }
         }
         Ok(())
@@ -973,8 +982,9 @@ impl<W: Write> Writer<W> {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
     use crate::test_data;
+
+    use super::*;
 
     #[test]
     fn write_abc() {

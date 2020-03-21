@@ -82,6 +82,10 @@ pub enum Multiname {
     MultinameLA {
         namespace_set: Index<NamespaceSet>,
     },
+    TypeName {
+        name: Index<String>,
+        parameters: Vec<Index<String>>
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

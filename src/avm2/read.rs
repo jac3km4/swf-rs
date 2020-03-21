@@ -1,6 +1,8 @@
+use std::convert::{Infallible, TryFrom};
+use std::io::{Cursor, Error, ErrorKind, Read, Result};
+
 use crate::avm2::types::*;
 use crate::read::SwfRead;
-use std::io::{Error, ErrorKind, Read, Result};
 
 pub struct Reader<R: Read> {
     inner: R,
@@ -72,15 +74,23 @@ impl<R: Read> Reader<R> {
     }
 
     fn read_u30(&mut self) -> Result<u32> {
-        let mut n = 0;
+        self.read_var_length()
+    }
+
+    fn read_var_length(&mut self) -> Result<u32> {
         let mut i = 0;
+        let mut n = 0;
         loop {
             let byte: u32 = self.read_u8()?.into();
-            n |= (byte & 0b0111_1111) << i;
-            i += 7;
-            if byte & 0b1000_0000 == 0 {
+            let shift = i * 7;
+            // ending byte
+            if byte & 0b1000_0000 == 0 || i == 4 {
+                n |= byte << shift;
                 break;
+            } else {
+                n |= (byte & 0b0111_1111) << shift;
             }
+            i += 1;
         }
         Ok(n)
     }
@@ -94,20 +104,9 @@ impl<R: Read> Reader<R> {
             | (i32::from(self.read_u8()?) << 8)
             | (i32::from(self.read_u8()?) << 16))
     }
+
     fn read_i32(&mut self) -> Result<i32> {
-        let mut n: i32 = 0;
-        let mut i = 0;
-        loop {
-            let byte: i32 = self.read_u8()?.into();
-            n |= (byte & 0b0111_1111) << i;
-            i += 7;
-            if byte & 0b1000_0000 == 0 {
-                n <<= 32 - i;
-                n >>= 32 - i;
-                break;
-            }
-        }
-        Ok(n)
+        Ok(self.read_var_length()? as i32)
     }
 
     fn read_string(&mut self) -> Result<String> {
@@ -184,6 +183,15 @@ impl<R: Read> Reader<R> {
             0x1c => Multiname::MultinameLA {
                 namespace_set: self.read_index()?,
             },
+            0x1d => {
+                let name = self.read_index()?;
+                let length = self.read_u30()?;
+                let mut parameters = Vec::with_capacity(length as usize);
+                for _ in 0..length {
+                    parameters.push(self.read_index()?);
+                }
+                Multiname::TypeName { name, parameters }
+            }
             _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid multiname kind")),
         })
     }
@@ -257,7 +265,7 @@ impl<R: Read> Reader<R> {
     }
 
     fn read_method(&mut self) -> Result<Method> {
-        let num_params = self.read_u8()? as usize;
+        let num_params = self.read_u30()? as usize;
         let return_type = self.read_index()?;
         let mut params = vec![];
         for _ in 0..num_params {
@@ -482,11 +490,15 @@ impl<R: Read> Reader<R> {
         let num_locals = self.read_u30()?;
         let init_scope_depth = self.read_u30()?;
         let max_scope_depth = self.read_u30()?;
-
-        let code_len = self.read_u30()?;
+        let code_len = self.read_u30()? as usize;
         let mut code = vec![];
+
+        let mut code_buf: Vec<u8> = Vec::with_capacity(code_len);
+        unsafe { code_buf.set_len(code_len) }
+
+        self.inner.read_exact(&mut code_buf)?;
         {
-            let mut code_reader = Reader::new(self.inner.by_ref().take(code_len.into()));
+            let mut code_reader = Reader::new(Cursor::new(code_buf));
             while let Ok(Some(op)) = code_reader.read_op() {
                 code.push(op);
             }
@@ -848,8 +860,9 @@ impl<R: Read> Reader<R> {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
     use crate::test_data;
+
+    use super::*;
 
     pub fn read_abc_from_file(path: &str) -> Vec<u8> {
         use crate::types::Tag;
