@@ -491,18 +491,10 @@ impl<R: Read> Reader<R> {
         let init_scope_depth = self.read_u30()?;
         let max_scope_depth = self.read_u30()?;
         let code_len = self.read_u30()? as usize;
-        let mut code = vec![];
 
-        let mut code_buf: Vec<u8> = Vec::with_capacity(code_len);
-        unsafe { code_buf.set_len(code_len) }
-
-        self.inner.read_exact(&mut code_buf)?;
-        {
-            let mut code_reader = Reader::new(Cursor::new(code_buf));
-            while let Ok(Some(op)) = code_reader.read_op() {
-                code.push(op);
-            }
-        }
+        let mut byte_code: Vec<u8> = Vec::with_capacity(code_len);
+        unsafe { byte_code.set_len(code_len) }
+        self.inner.read_exact(&mut byte_code)?;
 
         let num_exceptions = self.read_u30()? as usize;
         let mut exceptions = Vec::with_capacity(num_exceptions);
@@ -522,13 +514,13 @@ impl<R: Read> Reader<R> {
             num_locals,
             init_scope_depth,
             max_scope_depth,
-            code,
+            byte_code,
             exceptions,
             traits,
         })
     }
 
-    fn read_op(&mut self) -> Result<Option<Op>> {
+    pub fn read_op(&mut self) -> Result<Op> {
         use crate::avm2::opcode::OpCode;
         use num_traits::FromPrimitive;
 
@@ -844,7 +836,7 @@ impl<R: Read> Reader<R> {
             OpCode::URShift => Op::URShift,
         };
 
-        Ok(Some(op))
+        Ok(op)
     }
 
     fn read_exception(&mut self) -> Result<Exception> {

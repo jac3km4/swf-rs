@@ -1,4 +1,6 @@
 use std::marker::PhantomData;
+use crate::avm2::read::Reader;
+use std::io::Cursor;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbcFile {
@@ -113,9 +115,20 @@ pub struct MethodBody {
     pub num_locals: u32,
     pub init_scope_depth: u32,
     pub max_scope_depth: u32,
-    pub code: Vec<Op>,
+    pub byte_code: Vec<u8>,
     pub exceptions: Vec<Exception>,
     pub traits: Vec<Trait>,
+}
+
+impl MethodBody {
+    pub fn instructions(&self) -> Vec<Op> {
+        let mut code = vec![];
+        let mut code_reader = Reader::new(Cursor::new(&self.byte_code));
+        while let Ok(op) = code_reader.read_op() {
+            code.push(op);
+        }
+        code
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
